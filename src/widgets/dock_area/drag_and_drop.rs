@@ -116,6 +116,9 @@ fn button_ui(
             painter.line_segment([start, end], button_stroke);
         }
     }
+    let previous_rect = ui
+        .ctx()
+        .data_mut(|a| a.get_temp::<Rect>(Id::new("ui_resize_rect")));
     let is_mouse_over = rect
         .expand(style.overlay.feel.interact_expansion)
         .contains(mouse_pos);
@@ -123,17 +126,34 @@ fn button_ui(
         let vertical_alphas = vec2(1.0, 0.5);
         let horizontal_alphas = vec2(0.5, 1.0);
         let rect = match split {
-            Some(Split::Above) => Rect::from_min_size(rect.min, rect.size() * vertical_alphas),
-            Some(Split::Left) => Rect::from_min_size(rect.min, rect.size() * horizontal_alphas),
+            Some(Split::Above) => {
+                //Rect::from_min_size(rect.min, rect.size() * vertical_alphas)
+                let mut rect = ui.clip_rect();
+                rect.max.y = rect.center().y;
+                rect
+            }
+            Some(Split::Left) => {
+                // Rect::from_min_size(rect.min, rect.size() * horizontal_alphas)
+                let mut rect = ui.clip_rect();
+                rect.max.x = rect.center().x;
+                rect
+            }
             Some(Split::Below) => {
-                let min = rect.lerp_inside(lerp_vec(Split::Below, 0.0));
-                Rect::from_min_size(min, rect.size() * vertical_alphas)
+                // let min = rect.lerp_inside(lerp_vec(Split::Below, 0.0));
+                // Rect::from_min_size(min, rect.size() * vertical_alphas)
+                let mut rect = ui.clip_rect();
+                rect.min.y = rect.center().y;
+                rect
             }
             Some(Split::Right) => {
-                let min = rect.lerp_inside(lerp_vec(Split::Right, 0.0));
-                Rect::from_min_size(min, rect.size() * horizontal_alphas)
+                // let min = rect.lerp_inside(lerp_vec(Split::Right, 0.0));
+                // Rect::from_min_size(min, rect.size() * horizontal_alphas)
+                // right half of the clip rect
+                let mut rect = ui.clip_rect();
+                rect.min.x = rect.center().x;
+                rect
             }
-            _ => rect,
+            _ => ui.clip_rect(),
         };
         painter.rect_filled(rect, 0.0, style.overlay.selection_color);
     }
