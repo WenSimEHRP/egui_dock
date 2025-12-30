@@ -85,85 +85,55 @@ fn draw_highlight_rect(rect: Rect, ui: &Ui, style: &Style) {
     );
 }
 
-// Draws one of the Tab drop destination icons inside `rect`, which one you get is specified by `is_top_bottom`.
+/// Draws one of the Tab drop destination icons inside `rect`, which one you get is specified by `is_top_bottom`.
+/// The smoothing code is from egui_tiles, see
+/// https://github.com/rerun-io/egui_tiles/blob/f86273ba8ff9f44a9817067abbf977ba5cdcb9fa/src/tree.rs#L724-L752
+/// for details
 fn button_ui(
-    rect: Rect,
+    response_rect: Rect,
+    target_rect: Rect,
     ui: &Ui,
     lock: &mut bool,
     mouse_pos: Pos2,
     style: &Style,
-    split: Option<Split>,
 ) -> bool {
-    let visuals = &style.overlay;
-    let button_stroke = Stroke::new(1.0, visuals.button_color);
     let painter = make_overlay_painter(ui);
-    painter.rect_stroke(rect, 0.0, visuals.button_border_stroke, StrokeKind::Inside);
-    let rect = rect.shrink(rect.width() * 0.1);
-    painter.rect_stroke(rect, 0.0, button_stroke, StrokeKind::Inside);
-    let rim = { Rect::from_two_pos(rect.min, rect.lerp_inside(vec2(1.0, 0.1))) };
-    painter.rect(
-        rim,
-        0.0,
-        visuals.button_color,
-        Stroke::NONE,
-        StrokeKind::Inside,
-    );
-
-    if let Some(split) = split {
-        for line in DASHED_LINE_ALPHAS.chunks(2) {
-            let start = rect.lerp_inside(lerp_vec(split, line[0]));
-            let end = rect.lerp_inside(lerp_vec(split, line[1]));
-            painter.line_segment([start, end], button_stroke);
-        }
-    }
-    let previous_rect = ui
-        .ctx()
-        .data_mut(|a| a.get_temp::<Rect>(Id::new("ui_resize_rect")));
-    let is_mouse_over = rect
-        .expand(style.overlay.feel.interact_expansion)
-        .contains(mouse_pos);
+    let is_mouse_over = response_rect.contains(mouse_pos);
     if is_mouse_over && !*lock {
-        let vertical_alphas = vec2(1.0, 0.5);
-        let horizontal_alphas = vec2(0.5, 1.0);
-        let rect = match split {
-            Some(Split::Above) => {
-                //Rect::from_min_size(rect.min, rect.size() * vertical_alphas)
-                let mut rect = ui.clip_rect();
-                rect.max.y = rect.center().y;
-                rect
+        let dt = ui.ctx().input(|input| input.stable_dt).at_most(0.1);
+        let mut requires_repaint = false;
+        let smoothed_rect = ui.ctx().data_mut(|map| {
+            let smoothed: &mut Rect =
+                map.get_temp_mut_or(Id::new("tabs smoothing rect"), target_rect);
+            let t = egui::emath::exponential_smooth_factor(0.9, 0.05, dt);
+            *smoothed = smoothed.lerp_towards(&target_rect, t);
+
+            let diff =
+                smoothed.min.distance(target_rect.min) + smoothed.max.distance(target_rect.max);
+            if diff < 0.5 {
+                *smoothed = target_rect;
+            } else {
+                requires_repaint = true;
             }
-            Some(Split::Left) => {
-                // Rect::from_min_size(rect.min, rect.size() * horizontal_alphas)
-                let mut rect = ui.clip_rect();
-                rect.max.x = rect.center().x;
-                rect
-            }
-            Some(Split::Below) => {
-                // let min = rect.lerp_inside(lerp_vec(Split::Below, 0.0));
-                // Rect::from_min_size(min, rect.size() * vertical_alphas)
-                let mut rect = ui.clip_rect();
-                rect.min.y = rect.center().y;
-                rect
-            }
-            Some(Split::Right) => {
-                // let min = rect.lerp_inside(lerp_vec(Split::Right, 0.0));
-                // Rect::from_min_size(min, rect.size() * horizontal_alphas)
-                // right half of the clip rect
-                let mut rect = ui.clip_rect();
-                rect.min.x = rect.center().x;
-                rect
-            }
-            _ => ui.clip_rect(),
-        };
-        painter.rect_filled(rect, 0.0, style.overlay.selection_color);
+            *smoothed
+        });
+        if requires_repaint {
+            ui.ctx().request_repaint();
+        }
+        painter.rect(
+            smoothed_rect,
+            0,
+            style.overlay.selection_color,
+            Stroke::new(
+                style.overlay.selection_stroke_width * 2.0,
+                style.overlay.selection_color.to_opaque(),
+            ),
+            StrokeKind::Inside,
+        );
     }
     lock.bitor_assign(is_mouse_over);
     is_mouse_over
 }
-
-const DASHED_LINE_ALPHAS: [f32; 8] = [
-    0.0625, 0.1875, 0.3125, 0.4375, 0.5625, 0.6875, 0.8125, 0.9375,
-];
 
 #[derive(PartialEq, Eq)]
 enum LockState {
@@ -204,20 +174,25 @@ impl DragDropState {
 
         draw_highlight_rect(self.hover.rect, ui, style);
         let mut hovering_buttons = false;
-        let total_button_spacing = style.overlay.button_spacing * 2.0;
         let (rect, pointer) = (self.hover.rect, self.pointer);
-        let rect = rect.shrink(style.overlay.button_spacing);
-        let shortest_side = ((rect.width() - total_button_spacing) / 3.0)
-            .min((rect.height() - total_button_spacing) / 3.0)
-            .min(style.overlay.max_button_size);
-
+        let rect = {
+            let mut rect = rect;
+            rect.min.y += style.tab_bar.height;
+            rect
+        };
         let mut destination: Option<TabDestination> = windows_allowed
             .then(|| TabDestination::Window(Rect::from_min_size(pointer, self.drag.rect.size())));
 
         let center = rect.center();
-        let rect = Rect::from_center_size(center, Vec2::splat(shortest_side));
 
-        if button_ui(rect, ui, &mut hovering_buttons, pointer, style, None) {
+        if button_ui(
+            Rect::from_center_size(center, rect.size() / 3.0),
+            rect,
+            ui,
+            &mut hovering_buttons,
+            pointer,
+            style,
+        ) {
             match self.hover.dst {
                 TreeComponent::Node(surface, node) => {
                     destination = Some(TabDestination::Node(surface, node, TabInsert::Append))
@@ -235,20 +210,58 @@ impl DragDropState {
                 AllowedSplits::LeftRightOnly if !split.is_left_right() => continue,
                 AllowedSplits::None => continue,
                 _ => {
-                    let offset_value = shortest_side + style.overlay.button_spacing;
+                    // let offset_value = shortest_side + style.overlay.button_spacing;
+                    // Split the screen into nine equal sections:
+                    //
+                    // +---+---+---+
+                    // | L | A | R |
+                    // +---+---+---+
+                    // | L | C | R |
+                    // +---+---+---+
+                    // | L | B | R |
+                    // +---+---+---+
+                    //
                     let offset_vector = match split {
-                        Split::Above => vec2(0.0, -offset_value),
-                        Split::Below => vec2(0.0, offset_value),
-                        Split::Left => vec2(-offset_value, 0.0),
-                        Split::Right => vec2(offset_value, 0.0),
+                        Split::Above => vec2(0.0, -rect.height() / 3.0),
+                        Split::Below => vec2(0.0, rect.height() / 3.0),
+                        Split::Left => vec2(-rect.width() / 3.0, 0.0),
+                        Split::Right => vec2(rect.width() / 3.0, 0.0),
+                    };
+                    let size_vector = match split {
+                        Split::Above | Split::Below => {
+                            vec2(rect.width() / 3.0, rect.height() / 3.0)
+                        }
+                        Split::Left | Split::Right => vec2(rect.width() / 3.0, rect.height()),
+                    };
+                    let target_rect = match split {
+                        Split::Above => {
+                            let mut rect = rect;
+                            rect.max.y = rect.center().y;
+                            rect
+                        }
+                        Split::Below => {
+                            let mut rect = rect;
+                            rect.min.y = rect.center().y;
+                            rect
+                        }
+                        Split::Left => {
+                            let mut rect = rect;
+                            rect.max.x = rect.center().x;
+                            rect
+                        }
+                        Split::Right => {
+                            let mut rect = rect;
+                            rect.min.x = rect.center().x;
+                            rect
+                        }
                     };
                     if button_ui(
-                        Rect::from_center_size(center + offset_vector, Vec2::splat(shortest_side)),
+                        Rect::from_center_size(center + offset_vector, size_vector),
+                        target_rect,
                         ui,
                         &mut hovering_buttons,
                         pointer,
                         style,
-                        Some(split),
                     ) {
                         if let TreeComponent::Node(surface, node) = self.hover.dst {
                             destination =
