@@ -97,39 +97,9 @@ fn button_ui(
     mouse_pos: Pos2,
     style: &Style,
 ) -> bool {
-    let painter = make_overlay_painter(ui);
     let is_mouse_over = response_rect.contains(mouse_pos);
     if is_mouse_over && !*lock {
-        let dt = ui.ctx().input(|input| input.stable_dt).at_most(0.1);
-        let mut requires_repaint = false;
-        let smoothed_rect = ui.ctx().data_mut(|map| {
-            let smoothed: &mut Rect =
-                map.get_temp_mut_or(Id::new("tabs smoothing rect"), target_rect);
-            let t = egui::emath::exponential_smooth_factor(0.9, 0.05, dt);
-            *smoothed = smoothed.lerp_towards(&target_rect, t);
-
-            let diff =
-                smoothed.min.distance(target_rect.min) + smoothed.max.distance(target_rect.max);
-            if diff < 0.5 {
-                *smoothed = target_rect;
-            } else {
-                requires_repaint = true;
-            }
-            *smoothed
-        });
-        if requires_repaint {
-            ui.ctx().request_repaint();
-        }
-        painter.rect(
-            smoothed_rect,
-            0,
-            style.overlay.selection_color,
-            Stroke::new(
-                style.overlay.selection_stroke_width * 2.0,
-                style.overlay.selection_color.to_opaque(),
-            ),
-            StrokeKind::Inside,
-        );
+        draw_overlay_rect(target_rect, ui, style);
     }
     lock.bitor_assign(is_mouse_over);
     is_mouse_over
@@ -178,6 +148,7 @@ impl DragDropState {
         let rect = {
             let mut rect = rect;
             rect.min.y += style.tab_bar.height;
+            rect = rect.shrink(10.0);
             rect
         };
         let mut destination: Option<TabDestination> = windows_allowed
@@ -281,7 +252,7 @@ impl DragDropState {
         if let Some(TabDestination::Window(rect)) = destination {
             let rect = self.window_preview_rect(rect);
             let rect_bounded = constrain_rect_to_area(ui, rect, window_bounds);
-            draw_window_rect(rect_bounded, ui, style);
+            draw_overlay_rect(rect_bounded, ui, style);
         }
         destination
     }
@@ -302,7 +273,7 @@ impl DragDropState {
 
         // Deals with hovers over tab bar and tab titles.
         if let Some(rect) = self.hover.tab {
-            draw_drop_rect(rect, ui, style);
+            draw_overlay_rect(rect, ui, style);
             let target_lock_state = if rect.contains(self.pointer) {
                 LockState::SoftLock
             } else {
@@ -394,10 +365,10 @@ impl DragDropState {
             Some(TabDestination::Window(rect)) => {
                 let rect = self.window_preview_rect(rect);
                 let rect_bounded = constrain_rect_to_area(ui, rect, window_bounds);
-                draw_window_rect(rect_bounded, ui, style);
+                draw_overlay_rect(rect_bounded, ui, style);
             }
             Some(_) => {
-                draw_drop_rect(hover_rect.intersect(overlay_rect), ui, style);
+                draw_overlay_rect(hover_rect.intersect(overlay_rect), ui, style);
             }
             None => (),
         }
@@ -449,35 +420,43 @@ impl DragDropState {
     }
 }
 
-#[inline(always)]
-const fn lerp_vec(split: Split, alpha: f32) -> Vec2 {
-    if split.is_top_bottom() {
-        vec2(alpha, 0.5)
-    } else {
-        vec2(0.5, alpha)
-    }
-}
-
-// Draws a filled rect describing where a tab will be dropped.
-#[inline(always)]
-fn draw_drop_rect(rect: Rect, ui: &Ui, style: &Style) {
+#[inline]
+fn draw_overlay_rect(target_rect: Rect, ui: &Ui, style: &Style) {
+    let smoothed_rect = create_smoothed_rect(target_rect, ui.ctx());
     let painter = make_overlay_painter(ui);
-    painter.rect_filled(rect, 0.0, style.overlay.selection_color);
-}
-
-// Draws a stroked rect describing where a tab will be dropped.
-#[inline(always)]
-fn draw_window_rect(rect: Rect, ui: &Ui, style: &Style) {
-    let painter = make_overlay_painter(ui);
-    painter.rect_stroke(
-        rect,
-        0.0,
+    painter.rect(
+        smoothed_rect,
+        0,
+        style.overlay.selection_color,
         Stroke::new(
             style.overlay.selection_stroke_width,
-            style.overlay.selection_color,
+            style.overlay.selection_color.to_opaque(),
         ),
         StrokeKind::Inside,
     );
+}
+
+#[inline]
+fn create_smoothed_rect(target_rect: Rect, ctx: &Context) -> Rect {
+    let dt = ctx.input(|input| input.stable_dt).at_most(0.1);
+    let mut requires_repaint = false;
+    let smoothed_rect = ctx.data_mut(|map| {
+        let smoothed: &mut Rect = map.get_temp_mut_or(Id::new("tabs smoothing rect"), target_rect);
+        let t = egui::emath::exponential_smooth_factor(0.9, 0.05, dt);
+        *smoothed = smoothed.lerp_towards(&target_rect, t);
+
+        let diff = smoothed.min.distance(target_rect.min) + smoothed.max.distance(target_rect.max);
+        if diff < 0.5 {
+            *smoothed = target_rect;
+        } else {
+            requires_repaint = true;
+        }
+        *smoothed
+    });
+    if requires_repaint {
+        ctx.request_repaint();
+    };
+    smoothed_rect
 }
 
 /// An adapted version of the [`egui::Area`]s code for restricting an area rect to a bound.
