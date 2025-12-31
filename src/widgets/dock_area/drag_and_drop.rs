@@ -426,7 +426,7 @@ fn draw_overlay_rect(target_rect: Rect, ui: &Ui, style: &Style) {
     let painter = make_overlay_painter(ui);
     painter.rect(
         smoothed_rect,
-        0,
+        style.overlay.selection_corner_radius,
         style.overlay.selection_color,
         Stroke::new(
             style.overlay.selection_stroke_width,

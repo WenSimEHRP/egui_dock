@@ -271,6 +271,9 @@ pub struct OverlayStyle {
     /// Width of stroke when a selection uses an outline instead of filled rectangle.
     pub selection_stroke_width: f32,
 
+    /// Corner radius of the selection rectangle.
+    pub selection_corner_radius: CornerRadius,
+
     /// Units of padding between each button.
     pub button_spacing: f32,
 
@@ -484,6 +487,7 @@ impl Default for OverlayStyle {
         Self {
             selection_color: Color32::from_rgb(0, 191, 255).linear_multiply(0.5),
             selection_stroke_width: 1.0,
+            selection_corner_radius: CornerRadius::ZERO,
             button_spacing: 10.0,
             max_button_size: 100.0,
 
