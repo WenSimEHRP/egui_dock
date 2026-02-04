@@ -560,7 +560,7 @@ impl<Tab> DockArea<'_, Tab> {
 
         let popup_id = ui.id().with("tab_add_popup");
         if self.show_add_popup {
-            Popup::from_toggle_button_response(&response)
+            Popup::menu(&response)
                 .id(popup_id)
                 .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
                 .show(|ui| {
